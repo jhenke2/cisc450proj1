@@ -1,7 +1,10 @@
 /* udp_client.c */ 
 /* Programmed by Adarsh Sethi */
-/* Sept. 19, 2021 */
-
+/* Sept. 19, 2021
+ * Modified by:
+ * Justin Henke
+ * Eli Haberman-Rivera
+ * 10/20/2021 */
 #include <stdio.h>          /* for standard I/O functions */
 #include <stdlib.h>         /* for exit */
 #include <string.h>         /* for memset, memcpy, and strlen */
@@ -10,6 +13,7 @@
 #include <netinet/in.h>     /* for sockaddr_in */
 #include <unistd.h>         /* for close */
 #include <arpa/inet.h>      /* for htons and such */
+#include <time.h>           /* to seed rng generator */
 
 #define STRING_SIZE 1024
 
@@ -27,6 +31,8 @@ struct ResponsePacket {
 }response_packet;
 
 int main(void) {
+
+   srand(time(NULL)); /* seed rand function */
 
    int sock_client;  /* Socket used by client */ 
 
@@ -116,40 +122,39 @@ int main(void) {
    server_addr.sin_port = htons(server_port);
 
    //initialize vars
-   int confirm = 1;
-   unsigned short int userInputCount;
-   struct RequestPacket requestPacket;
-   struct ResponsePacket responsePacket;
-   unsigned short int totalOfSeqNums;
-   unsigned long  int totalPayloadChecksum;
-   char answer[STRING_SIZE];
-   requestPacket.ID = 1;
-   requestPacket.ID = htons(requestPacket.ID);
+   int confirm = 1;				//loop for more requests
+   struct RequestPacket requestPacket;		//initialize requestPacket
+   struct ResponsePacket responsePacket;	//initialize responsePacket
+   unsigned short int totalOfSeqNums;		//sequence checksum
+   unsigned long  int totalPayloadChecksum;	//payload checksum
+   char answer[STRING_SIZE];			//for user input at end of loop
+   requestPacket.ID = 1;			//set ID of first request to 1
    do {
-	//reset vars
+	//reset vars to default values for new request
 	totalOfSeqNums = 0;
 	totalPayloadChecksum = 0;
-	userInputCount = 0;
 	packets_recd = 0;
 	bytes_recd = 0;
 	bytes_sent = 0;
-	
+	long int tempUserInput= 0;	
 	/* check user input for count of numbers*/
 	do {
    		printf("How many randomly generated numbers would you like to receive from the server?"
 		       "\nEnter number between 1 and 65,535: ");
-		scanf("%hu", &userInputCount);
-	}while (userInputCount < 1 || userInputCount > 65535);
+		scanf("%ld", &tempUserInput);
+		fflush(stdin);
+	}while (tempUserInput < 1 || tempUserInput > 65535); //while user input is garbage
 
 	//set request packet information in network safe htons form 
-	requestPacket.count = htons(userInputCount);
-	requestPacket.ID = htons(requestPacket.ID);
+	requestPacket.count = htons(tempUserInput);
+	int tempID = requestPacket.ID;
+	requestPacket.ID = htons(tempID);
   	int temp_bytes_sent;
 
 	//attempt to send the packet
    	temp_bytes_sent = sendto(sock_client, &requestPacket, sizeof(requestPacket), 0,
             (struct sockaddr *) &server_addr, sizeof (server_addr));
-	if (temp_bytes_sent < 1){ //error
+	if (temp_bytes_sent < 1){ //error, don't save bytes sent, jump to new request
 		printf("ERROR in sending packet\n");
 		continue;
 	}
@@ -166,19 +171,24 @@ int main(void) {
 			printf("ERROR in received packet\n");
 			continue;
 		}
+		//throw out packet that doesn't match ID of request
 		if(ntohs(responsePacket.ID) != ntohs(requestPacket.ID))
 			continue;
 		else{
-			bytes_recd+=temp_bytes_recd; //Only count data tied to request
+			bytes_recd+=temp_bytes_recd; //Only count data tied to successful request
 			packets_recd++;
 			for(int i = 0; i < ntohs(responsePacket.count); i++){ //extract payload
-				totalPayloadChecksum+=ntohl(responsePacket.payload[i]);
+				totalPayloadChecksum+=ntohl(responsePacket.payload[i]); //compute checksum
 				//printf("%d: %lu\n",i, responsePacket.payload[i]);
 			}
-			totalOfSeqNums+=ntohs(responsePacket.seqNum);
+			totalOfSeqNums+=ntohs(responsePacket.seqNum); //compute checksum of seq nums
 		}
 
-	}while(ntohs(responsePacket.Last) == 0);
+	}while(ntohs(responsePacket.Last) == 0); //loop back around while not last packet
+	//Fully aware that this can and does cause a livelock with large request sizes, 
+	//where the last packet is lost and the client will forever wait for the
+	//mystical 'Last' packet that never will arrive.
+	//This will be fixed in the TCP version in the future!
 
 	//print summary information
 	printf( "All packet(s) received.\n"
@@ -189,7 +199,10 @@ int main(void) {
 		"Total number of bytes received: %d\n"
 		"Sum of Sequence Numbers: %u\n"
 		"Sum of Checksums: %lu\n\n",
-		ntohs(requestPacket.ID), ntohs(requestPacket.count), packets_recd, bytes_recd, totalOfSeqNums, totalPayloadChecksum);
+		ntohs(requestPacket.ID),
+		ntohs(requestPacket.count),
+		packets_recd, bytes_recd,
+		totalOfSeqNums, totalPayloadChecksum);
 
    	do { //ask user if they would like to send another request to the server
 
@@ -197,15 +210,20 @@ int main(void) {
 	  	       "\nEnter 'y' or 'yes' to confirm, 'n' or 'no' to exit: ");
        
     		scanf("%s", answer);
-   	}while(!strcmp(answer, "y") && !strcmp(answer, "n") && !strcmp(answer, "yes") && !strcmp(answer, "no"));
+		fflush(stdin);
+   	}while(strcmp(answer, "y") != 0 && 
+			strcmp(answer, "n") != 0 && 
+			strcmp(answer, "yes") != 0 && 
+			strcmp(answer, "no") != 0);
 
 	//if user wants to exit
-	if (!strcmp(answer, "n") || !strcmp(answer, "no"))
+	if (strcmp(answer, "n") == 0 || strcmp(answer, "no") == 0)
 		confirm = 0;
 	else {
 		//continue!
-		requestPacket.ID = ntohs(requestPacket.ID);
-		requestPacket.ID+= 1;
+		unsigned short int temp = requestPacket.ID;
+		requestPacket.ID = ntohs(temp);
+		requestPacket.ID++;//increment requestPacket's ID in host byte order (will fix on next loop)
 	}
 
    }while(confirm ==1);

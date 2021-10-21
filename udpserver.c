@@ -1,6 +1,10 @@
 /* udp_server.c */
 /* Programmed by Adarsh Sethi */
-/* Sept. 19, 2021 */
+/* Sept. 19, 2021
+ * Modified by:
+ * Justin Henke
+ * Eli Haberman-Rivera
+ * 10/20/2021 */
 
 #include <ctype.h>          /* for toupper */
 #include <stdio.h>          /* for standard I/O functions */
@@ -81,15 +85,18 @@ int main(void) {
 
    client_addr_len = sizeof (client_addr);
 
-   struct RequestPacket requestPacket;
-   struct ResponsePacket responsePacket;
-   responsePacket.Last = htons(0);
-   int sentRandCount;
-   int lastPacket = 0;
-   unsigned short int totalOfSeqNums;
-   bytes_sent = 0;
-   unsigned long  int totalPayloadChecksum;
+
+   //initialize vars
+   struct RequestPacket requestPacket;		//requestPacket struct
+   struct ResponsePacket responsePacket;	//responsePacket struct
+   responsePacket.Last = htons(0);		//set Last to 0
+   int sentRandCount;				//how many rand numbers have we sent?
+   int lastPacket = 0;				//local variable so we don't have to ntohs response.Last
+   unsigned short int totalOfSeqNums;		//checksum for seqnums
+   bytes_sent = 0;				//how many bytes have we sent?
+   unsigned long  int totalPayloadChecksum;	//checksum for payload
    for(;;) {
+      //reset variables for next response
       bytes_sent = 0;
       bytes_recd = 0;
       totalOfSeqNums = 0;
@@ -97,22 +104,24 @@ int main(void) {
       sentRandCount = 0;
       packets_sent = 0;
 
+      //wait for and receive request from client
       int temp_bytes_recd = recvfrom(sock_server, &requestPacket, sizeof(requestPacket), 0,
                      (struct sockaddr *) &client_addr, &client_addr_len);
-      if (temp_bytes_recd < 1){ 
+      if (temp_bytes_recd < 1){ //ERROR, throw out packet
 	      printf("ERROR: bad packet reception.");
-	      continue;
+	      continue;//loop back around to next request
       }
+      //else continue
       bytes_recd += temp_bytes_recd;
 	
-      /* prepare the message to send */
-
+      //set response ID to request ID
       responsePacket.ID = htons(ntohs(requestPacket.ID));
 
       do {
-	      packets_sent++;
-	      /*load up payload*/
+	      packets_sent++; //increment sent packet counter
+	      /*load up payload with randomly generated longs*/
 	      for (i=0; i<25 && sentRandCount < ntohs(requestPacket.count); i++){
+		      //this function generates a random 32bit number, as rand isn't guaranteed to be 32 bit
 			unsigned long int random = 
 			(unsigned long int)(((uint32_t) rand() <<  0) & 0x000000000000FFFFull) |
 			                   (((uint32_t) rand() << 16) & 0x00000000FFFF0000ull);
@@ -128,28 +137,30 @@ int main(void) {
 			      responsePacket.payload[k] = htonl(0);
 	      }
 	      
-	      /* send message */
+	      //decide if last packet or not
 	      if (sentRandCount < ntohs(requestPacket.count))
 		 responsePacket.Last = htons(0);
 	      else {
 	      	 responsePacket.Last = htons(1);
 		 lastPacket = 1;
 	      }
+	      //set count and seqNum
  	      responsePacket.seqNum = htons(packets_sent);
 	      responsePacket.count = htons(i);
 	      totalOfSeqNums+=packets_sent;
-	      int temp_bytes_sent;
+	      int temp_bytes_sent; //temp var for setting sent data
 	      temp_bytes_sent = sendto(sock_server, &responsePacket, sizeof(responsePacket), 0,
                 	(struct sockaddr*) &client_addr, client_addr_len);
 
-	      if (temp_bytes_sent < 1)
+	      if (temp_bytes_sent < 1) //error! don't count the data as being sent
 	      	printf("ERROR: error in sending packet.");
 	      else {
-		bytes_sent+=temp_bytes_sent;
+		bytes_sent+=temp_bytes_sent; //save sent byte count to counter var
 	      }
 
-      }while(sentRandCount < ntohs(requestPacket.count) || lastPacket == 0);
+      }while(sentRandCount < ntohs(requestPacket.count) || lastPacket == 0);//while not last packet essentially
 
+      //print summary data
       printf( "All packet(s) received.\n"
 	      "———————Data Summary———————\n"
 	      "Request ID: %u\n"
@@ -158,7 +169,10 @@ int main(void) {
 	      "Total number of bytes transmitted: %d\n"
 	      "Sum of Sequence Numbers: %u\n"
 	      "Sum of Checksums: %lu\n\n",
-	      ntohs(requestPacket.ID), ntohs(requestPacket.count), packets_sent, bytes_sent, totalOfSeqNums, totalPayloadChecksum);
+	      ntohs(requestPacket.ID),
+	      ntohs(requestPacket.count),
+	      packets_sent, bytes_sent,
+	      totalOfSeqNums, totalPayloadChecksum);
 
    }
 }
